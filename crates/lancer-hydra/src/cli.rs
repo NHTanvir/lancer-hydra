@@ -268,13 +268,31 @@ fn build_options(cli: &Cli, args: &[String]) -> Result<EngineOptions, String> {
         }
         _ => PassSource::None,
     };
-    let cred = CredConfig {
+    let mut cred = CredConfig {
         logins,
         passwords,
         combo: cli.combo.clone(),
         extra: ExtraModes::parse(cli.extra.as_deref().unwrap_or("")),
         users_first: cli.users_first,
+        defaults: Vec::new(),
     };
+    // With no explicit credential source, fall back to the built-in default
+    // corpus for this protocol (admin:admin, root:root, ...).
+    if !cred.has_explicit_creds() {
+        cred.defaults = hydra_core::default_creds(&scheme);
+    }
+
+    // A login source with no password source (and no combo / extras) would emit
+    // zero credentials — upstream hydra rejects this rather than running a no-op.
+    let has_passwords = !matches!(cred.passwords, PassSource::None)
+        || cred.combo.is_some()
+        || cred.extra.any();
+    let has_logins = !matches!(cred.logins, LoginSource::None);
+    if has_logins && !has_passwords {
+        return Err(
+            "a login was given (-l/-L) but no password source (-p/-P/-x/-C/-e)".into(),
+        );
+    }
 
     // --- module options + timing ---
     let mut module_opts = ModuleOpts::from_raw(cli.module_opts.clone());
@@ -288,14 +306,18 @@ fn build_options(cli: &Cli, args: &[String]) -> Result<EngineOptions, String> {
     module_opts.quiet = cli.quiet;
     module_opts.http_auth = cli.http_auth.clone();
 
-    // Honour upstream proxy env aliases (chaining not yet wired into the dialer).
-    if let Some(p) = &cli.proxy {
-        std::env::set_var("HYDRA_PROXY", p);
-        tracing::warn!("--proxy recorded (HYDRA_PROXY); proxy dialing is not yet wired in");
-    }
-    if let Some(pa) = &cli.proxy_auth {
-        std::env::set_var("HYDRA_PROXY_AUTH", pa);
-    }
+    // Proxy: the flag wins; the upstream env var is the parity fallback. The
+    // dialer (net::connect) tunnels every TCP module through this. HTTP modules
+    // additionally prefer HYDRA_PROXY_HTTP when set.
+    module_opts.proxy = cli
+        .proxy
+        .clone()
+        .or_else(|| std::env::var("HYDRA_PROXY").ok());
+    module_opts.proxy_auth = cli
+        .proxy_auth
+        .clone()
+        .or_else(|| std::env::var("HYDRA_PROXY_AUTH").ok());
+    module_opts.proxy_http = std::env::var("HYDRA_PROXY_HTTP").ok();
 
     let output_format = OutputFormat::parse(&cli.format)
         .ok_or_else(|| format!("unknown -b format: {}", cli.format))?;

@@ -49,6 +49,16 @@ async fn auth(
             c.write_line(&resp).await?;
             read_tagged(&mut c, "a1").await?
         }
+        "XOAUTH2" => {
+            // SASL XOAUTH2: base64("user=<u>^Aauth=Bearer <token>^A^A") — the
+            // password field carries the OAuth2 bearer token (M365 / Workspace).
+            c.write_line("a1 AUTHENTICATE XOAUTH2").await?;
+            let _ = c.read_line().await?; // continuation
+            let token =
+                crate::crypto::b64encode(format!("user={user}\x01auth=Bearer {pass}\x01\x01").as_bytes());
+            c.write_line(&token).await?;
+            read_tagged(&mut c, "a1").await?
+        }
         _ => {
             c.write_line(&format!("a1 LOGIN {} {}", quote(user), quote(pass)))
                 .await?;

@@ -44,7 +44,12 @@ impl Protocol for PostgreSql {
         pass: &str,
         opts: &ModuleOpts,
     ) -> Result<AuthOutcome, ProtocolError> {
-        let mut c = connect(target, opts).await?;
+        // `-m PORT=5433` overrides the port for this module (upstream parity).
+        let mut t = target.clone();
+        if let Some(p) = opts.get("PORT").and_then(|v| v.parse::<u16>().ok()) {
+            t.port = p;
+        }
+        let mut c = connect(&t, opts).await?;
         let db = opts.get("DB").unwrap_or(user);
 
         // StartupMessage (protocol 3.0).

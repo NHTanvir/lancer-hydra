@@ -125,6 +125,7 @@ async fn cred_estimate_cartesian() {
         combo: None,
         extra: ExtraModes::default(),
         users_first: false,
+        defaults: Vec::new(),
     };
     // 1 user × 10 single-digit passwords.
     assert_eq!(cfg.estimate().await, Some(10));

@@ -50,17 +50,6 @@ impl Engine {
             }
         }
 
-        // Resume bookkeeping (best-effort): report prior progress if present.
-        if opts.resume {
-            if let Ok(rf) = hydra_output::RestoreFile::load(&opts.restore_path) {
-                tracing::info!(
-                    "resuming: {} creds previously attempted, {} prior hits",
-                    rf.creds_done,
-                    rf.hits.len()
-                );
-            }
-        }
-
         let sink = OutputSink::new(
             opts.output_format,
             opts.output_file.clone(),
@@ -74,6 +63,24 @@ impl Engine {
         );
         let rate = ratelimit::make(opts.rate_per_sec);
         let creds_done = Arc::new(AtomicU64::new(0));
+
+        // Resume (`-R`): skip the credentials a prior run already attempted. The
+        // restore counter is a global total, so divide across targets (rounding
+        // down never over-skips, so no credential is missed — at worst a few are
+        // retried). Seed the live counter so the totals continue across resumes.
+        let mut resume_skip = 0u64;
+        if opts.resume {
+            if let Ok(rf) = hydra_output::RestoreFile::load(&opts.restore_path) {
+                let n = opts.targets.len().max(1) as u64;
+                resume_skip = rf.creds_done / n;
+                creds_done.store(rf.creds_done, Ordering::Relaxed);
+                tracing::info!(
+                    "resuming: skipping {resume_skip} cred(s)/target ({} previously attempted, {} prior hits)",
+                    rf.creds_done,
+                    rf.hits.len()
+                );
+            }
+        }
 
         let per_target_total = opts.cred.estimate().await;
         let grand_total = per_target_total.map(|n| n.saturating_mul(opts.targets.len() as u64));
@@ -125,9 +132,10 @@ impl Engine {
             let quiet = opts.quiet;
             let wait_connect = module_opts.wait_connect;
             let retry_wait = module_opts.retry_wait;
+            let skip = resume_skip;
 
             targets_set.spawn(async move {
-                let rx = cred.stream(buffer);
+                let rx = cred.stream(buffer, skip);
                 let queue = credqueue::wrap(rx);
                 let target_token = stop.target_token();
                 let mut workers: JoinSet<()> = JoinSet::new();

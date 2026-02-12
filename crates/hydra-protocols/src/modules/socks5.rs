@@ -23,6 +23,13 @@ impl Protocol for Socks5 {
         pass: &str,
         opts: &ModuleOpts,
     ) -> Result<AuthOutcome, ProtocolError> {
+        // `-m AUTH=user-pass` (default) is implemented; `gssapi` needs SPNEGO/
+        // Kerberos which is out of scope for the pure-Rust transport.
+        if opts.get("AUTH").map(|v| v.eq_ignore_ascii_case("gssapi")).unwrap_or(false) {
+            return Err(ProtocolError::Unsupported(
+                "socks5 gssapi auth (SPNEGO/Kerberos) not supported; use AUTH=user-pass".into(),
+            ));
+        }
         let mut c = connect(target, opts).await?;
         // Greeting: VER=5, NMETHODS=1, METHOD=0x02 (user/pass).
         c.write_all(&[0x05, 0x01, 0x02]).await?;

@@ -19,6 +19,8 @@ pub use options::EngineOptions;
 pub use target::{build_target, load_target_file, parse_target, ParsedTarget};
 
 // Re-export the building-block types frontends need so they depend on one crate.
-pub use hydra_credlist::{CharsetSpec, CredConfig, Credential, ExtraModes, LoginSource, PassSource};
+pub use hydra_credlist::{
+    default_creds, CharsetSpec, CredConfig, Credential, ExtraModes, LoginSource, PassSource,
+};
 pub use hydra_output::{Hit, OutputFormat};
 pub use hydra_protocols::{registry, AuthOutcome, IpPref, ModuleOpts, Protocol, Target};
