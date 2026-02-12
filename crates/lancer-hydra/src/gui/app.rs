@@ -62,9 +62,19 @@ pub struct HydraApp {
     // Specific tab
     module_opts: String,
     http_auth: String,
+    proxy: String,
+    proxy_auth: String,
+    sslv2: bool,
+    show_attempts: bool,
+    verbose: bool,
+    quiet: bool,
+    debug: bool,
     // Start tab / output
     output: String,
     format: String,
+    resume: bool,
+    ignore_restore: bool,
+    restore_file: String,
     // runtime
     services: Vec<String>,
     selected: Option<usize>,
@@ -113,8 +123,18 @@ impl HydraApp {
             stop_target: false,
             module_opts: String::new(),
             http_auth: String::new(),
+            proxy: String::new(),
+            proxy_auth: String::new(),
+            sslv2: false,
+            show_attempts: false,
+            verbose: false,
+            quiet: false,
+            debug: false,
             output: String::new(),
             format: "text".to_string(),
+            resume: false,
+            ignore_restore: false,
+            restore_file: "hydra.restore".to_string(),
             services,
             selected: None,
             shared,
@@ -175,7 +195,7 @@ impl HydraApp {
         } else {
             PassSource::None
         };
-        let cred = CredConfig {
+        let mut cred = CredConfig {
             logins,
             passwords,
             combo: if self.use_combo && !self.combo.trim().is_empty() {
@@ -189,7 +209,12 @@ impl HydraApp {
                 reversed: self.e_rev,
             },
             users_first: self.users_first,
+            defaults: Vec::new(),
         };
+        // No explicit credential source → fall back to the per-protocol defaults.
+        if !cred.has_explicit_creds() {
+            cred.defaults = hydra_core::default_creds(&scheme);
+        }
 
         let mut module_opts = ModuleOpts::from_raw(if self.module_opts.trim().is_empty() {
             None
@@ -200,11 +225,26 @@ impl HydraApp {
         module_opts.wait_connect = Duration::from_secs(self.wait_connect.parse().unwrap_or(0));
         module_opts.retry_wait = Duration::from_secs(self.retry_wait.parse().unwrap_or(0));
         module_opts.ssl = self.ssl;
+        module_opts.sslv2 = self.sslv2;
+        module_opts.verbose = self.verbose;
+        module_opts.quiet = self.quiet;
+        module_opts.debug = self.debug;
         if !self.http_auth.trim().is_empty() {
             module_opts.http_auth = Some(self.http_auth.trim().to_string());
         }
+        if !self.proxy.trim().is_empty() {
+            module_opts.proxy = Some(self.proxy.trim().to_string());
+        }
+        if !self.proxy_auth.trim().is_empty() {
+            module_opts.proxy_auth = Some(self.proxy_auth.trim().to_string());
+        }
 
         let output_format = OutputFormat::parse(&self.format).unwrap_or(OutputFormat::Text);
+        let restore_path = if self.restore_file.trim().is_empty() {
+            std::path::PathBuf::from("hydra.restore")
+        } else {
+            std::path::PathBuf::from(self.restore_file.trim())
+        };
 
         Ok(EngineOptions {
             scheme,
@@ -222,12 +262,12 @@ impl HydraApp {
                 Some(self.output.trim().into())
             },
             output_format,
-            restore_path: "hydra.restore".into(),
-            ignore_restore: false,
-            resume: false,
-            quiet: false,
-            verbose: false,
-            show_attempts: false,
+            restore_path,
+            ignore_restore: self.ignore_restore,
+            resume: self.resume,
+            quiet: self.quiet,
+            verbose: self.verbose,
+            show_attempts: self.show_attempts,
             command_line: format!("lancer-hydra (gui) {}://{}", self.service, self.target),
             queue_buffer: 1024,
             external_cancel: None,
@@ -304,12 +344,30 @@ impl eframe::App for HydraApp {
                 });
                 ui.menu_button("Tools", |ui| {
                     if ui.button("Run").clicked() {
+                        self.start_run();
+                        ui.close_menu();
+                    }
+                    if ui.button("Stop").clicked() {
+                        self.stop_run();
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("Settings", |ui| {
+                    if ui.button("Light theme").clicked() {
+                        ctx.set_visuals(egui::Visuals::light());
+                        ui.close_menu();
+                    }
+                    if ui.button("Dark theme").clicked() {
+                        ctx.set_visuals(egui::Visuals::dark());
                         ui.close_menu();
                     }
                 });
                 ui.menu_button("Help", |ui| {
                     ui.label(format!("lancer-hydra {}-lancer", env!("CARGO_PKG_VERSION")));
                     ui.label(format!("{} protocol modules", hydra_protocols_count()));
+                    ui.label(format!("{} schemes (incl. aliases)", registry::names().len()));
+                    ui.label("Rust THC-Hydra clone — Lancer ecosystem");
+                    ui.label("Authorized security testing only.");
                 });
             });
         });
@@ -511,6 +569,24 @@ impl HydraApp {
             ui.text_edit_singleline(&mut self.http_auth);
         });
         ui.separator();
+        ui.label("Proxy (OPSEC)");
+        ui.horizontal(|ui| {
+            ui.label("Proxy URL (--proxy)");
+            ui.text_edit_singleline(&mut self.proxy);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Proxy auth user:pass");
+            ui.text_edit_singleline(&mut self.proxy_auth);
+        });
+        ui.small("e.g. socks5://127.0.0.1:1080 or connect://proxy:8080");
+        ui.separator();
+        ui.label("Flags");
+        ui.checkbox(&mut self.sslv2, "SSLv2 legacy (-O)");
+        ui.checkbox(&mut self.show_attempts, "Show login:pass per attempt (-V)");
+        ui.checkbox(&mut self.verbose, "Verbose (-v)");
+        ui.checkbox(&mut self.quiet, "Quiet (-q)");
+        ui.checkbox(&mut self.debug, "Debug — wire trace (-d)");
+        ui.separator();
         if let Some(p) = registry::resolve(&self.service) {
             ui.label(format!("{} (port {})", p.name(), p.default_port()));
             ui.label(p.usage());
@@ -535,6 +611,14 @@ impl HydraApp {
                     ui.selectable_value(&mut self.format, f.to_string(), f);
                 }
             });
+        ui.separator();
+        ui.label("Restore / resume");
+        ui.horizontal(|ui| {
+            ui.label("Restore file (--restore-file)");
+            ui.text_edit_singleline(&mut self.restore_file);
+        });
+        ui.checkbox(&mut self.resume, "Resume from restore file (-R)");
+        ui.checkbox(&mut self.ignore_restore, "Ignore existing restore file (-I)");
         ui.separator();
         ui.horizontal(|ui| {
             if ui.button("▶ Run").clicked() {

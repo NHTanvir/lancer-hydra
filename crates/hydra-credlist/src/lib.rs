@@ -4,6 +4,7 @@
 //! bounded `tokio::sync::mpsc` channel so memory stays flat on 10M-line lists.
 
 pub mod charset;
+pub mod defaults;
 pub mod extra;
 pub mod generator;
 pub mod sources;
@@ -11,6 +12,7 @@ pub mod sources;
 use tokio::sync::mpsc::{self, Receiver};
 
 pub use charset::CharsetSpec;
+pub use defaults::default_creds;
 pub use extra::ExtraModes;
 pub use sources::{LoginSource, PassSource};
 
@@ -40,6 +42,9 @@ pub struct CredConfig {
     pub extra: ExtraModes,
     /// `-u`: loop users first (password spray) instead of passwords first.
     pub users_first: bool,
+    /// Built-in default `(login, password)` pairs, used only when no explicit
+    /// credential source was given (see [`default_creds`]). Empty = disabled.
+    pub defaults: Vec<(String, String)>,
 }
 
 impl Default for CredConfig {
@@ -50,16 +55,26 @@ impl Default for CredConfig {
             combo: None,
             extra: ExtraModes::default(),
             users_first: false,
+            defaults: Vec::new(),
         }
     }
 }
 
 impl CredConfig {
     /// Spawn the generator and return a bounded receiver of credentials.
-    pub fn stream(self, buffer: usize) -> Receiver<Credential> {
+    /// `skip` discards that many leading credentials (used by `-R` resume).
+    pub fn stream(self, buffer: usize, skip: u64) -> Receiver<Credential> {
         let (tx, rx) = mpsc::channel(buffer.max(1));
-        tokio::spawn(generator::produce(self, tx));
+        tokio::spawn(generator::produce(self, tx, skip));
         rx
+    }
+
+    /// Whether the user supplied any explicit credential source (`-l/-L/-p/-P`,
+    /// a charset, or a combo file). When false the default corpus may apply.
+    pub fn has_explicit_creds(&self) -> bool {
+        !matches!(self.logins, LoginSource::None)
+            || !matches!(self.passwords, PassSource::None)
+            || self.combo.is_some()
     }
 
     /// Best-effort total credential count for progress (None when unknowable,
@@ -67,6 +82,9 @@ impl CredConfig {
     pub async fn estimate(&self) -> Option<u64> {
         if self.combo.is_some() {
             return None;
+        }
+        if !self.has_explicit_creds() && !self.defaults.is_empty() {
+            return Some(self.defaults.len() as u64 * (1 + self.extra.count()));
         }
         let users = self.logins.count().await?;
         let passes = self.passwords.count()?;

@@ -85,6 +85,14 @@ pub struct ModuleOpts {
     pub quiet: bool,
     /// `-a` HTTP auth-type override (basic / ntlm / digest).
     pub http_auth: Option<String>,
+    /// `--proxy` / `HYDRA_PROXY` — single upstream proxy URL the dialer tunnels
+    /// through (`socks5://host:port` or `connect://host:port`).
+    pub proxy: Option<String>,
+    /// `--proxy-auth` / `HYDRA_PROXY_AUTH` — `user:pass` for the proxy above.
+    pub proxy_auth: Option<String>,
+    /// `HYDRA_PROXY_HTTP` — proxy used specifically by the HTTP modules,
+    /// overriding `proxy` for `http*`/`https*` schemes.
+    pub proxy_http: Option<String>,
     /// Extra `KEY=VALUE` flags such as the HTTP-form `2=NNN` success-status token.
     pub extras: HashMap<String, String>,
 }
@@ -104,6 +112,9 @@ impl Default for ModuleOpts {
             debug: false,
             quiet: false,
             http_auth: None,
+            proxy: None,
+            proxy_auth: None,
+            proxy_http: None,
             extras: HashMap::new(),
         }
     }

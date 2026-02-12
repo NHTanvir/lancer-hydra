@@ -10,9 +10,30 @@ use tokio::sync::mpsc::Sender;
 use crate::sources::PassSource;
 use crate::{CredConfig, Credential};
 
-/// Drive the generator, sending each credential into `tx`. Returns when the
-/// list is exhausted or the receiver is dropped (engine stopped).
-pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
+/// Sends credentials into the channel, discarding the first `skip` of them so a
+/// `-R` resume picks up where the previous run stopped. Returns `Err(())` once
+/// the receiver is gone (engine stopped) so producers can bail early.
+struct Emitter {
+    tx: Sender<Credential>,
+    skip_remaining: u64,
+}
+
+impl Emitter {
+    async fn emit(&mut self, c: Credential) -> Result<(), ()> {
+        if self.skip_remaining > 0 {
+            self.skip_remaining -= 1;
+            return Ok(());
+        }
+        self.tx.send(c).await.map_err(|_| ())
+    }
+}
+
+/// Drive the generator, sending each credential into `tx`. `skip` discards that
+/// many leading credentials (for `-R` resume). Returns when the list is
+/// exhausted or the receiver is dropped (engine stopped).
+pub async fn produce(config: CredConfig, tx: Sender<Credential>, skip: u64) {
+    let mut em = Emitter { tx, skip_remaining: skip };
+
     // Combo file (`-C`) takes precedence: pre-paired login:pass entries.
     if let Some(combo) = &config.combo {
         if let Ok(file) = File::open(combo).await {
@@ -23,16 +44,31 @@ pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
                     None => (line.clone(), String::new()),
                 };
                 for ep in config.extra.passwords_for(&user) {
-                    if tx.send(Credential::new(&user, ep)).await.is_err() {
+                    if em.emit(Credential::new(&user, ep)).await.is_err() {
                         return;
                     }
                 }
-                if tx.send(Credential::new(user, pass)).await.is_err() {
+                if em.emit(Credential::new(user, pass)).await.is_err() {
                     return;
                 }
             }
         } else {
             tracing::error!("could not open combo file {:?}", combo);
+        }
+        return;
+    }
+
+    // Default credential corpus: only when the user gave no explicit source.
+    if !config.has_explicit_creds() && !config.defaults.is_empty() {
+        for (u, p) in &config.defaults {
+            for ep in config.extra.passwords_for(u) {
+                if em.emit(Credential::new(u, ep)).await.is_err() {
+                    return;
+                }
+            }
+            if em.emit(Credential::new(u, p)).await.is_err() {
+                return;
+            }
         }
         return;
     }
@@ -48,7 +84,7 @@ pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
         match &config.passwords {
             PassSource::Single(p) => {
                 for u in &users {
-                    if tx.send(Credential::new(u, p)).await.is_err() {
+                    if em.emit(Credential::new(u, p)).await.is_err() {
                         return;
                     }
                 }
@@ -56,7 +92,7 @@ pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
             PassSource::Charset(spec) => {
                 for pw in spec.iter() {
                     for u in &users {
-                        if tx.send(Credential::new(u, &pw)).await.is_err() {
+                        if em.emit(Credential::new(u, &pw)).await.is_err() {
                             return;
                         }
                     }
@@ -67,7 +103,7 @@ pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
                     let mut lines = BufReader::new(file).lines();
                     while let Ok(Some(pw)) = lines.next_line().await {
                         for u in &users {
-                            if tx.send(Credential::new(u, &pw)).await.is_err() {
+                            if em.emit(Credential::new(u, &pw)).await.is_err() {
                                 return;
                             }
                         }
@@ -79,7 +115,7 @@ pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
         // Extras after the cartesian sweep.
         for u in &users {
             for ep in config.extra.passwords_for(u) {
-                if tx.send(Credential::new(u, ep)).await.is_err() {
+                if em.emit(Credential::new(u, ep)).await.is_err() {
                     return;
                 }
             }
@@ -88,19 +124,19 @@ pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
         // default: login is the outer loop, passwords iterate fastest.
         for u in &users {
             for ep in config.extra.passwords_for(u) {
-                if tx.send(Credential::new(u, ep)).await.is_err() {
+                if em.emit(Credential::new(u, ep)).await.is_err() {
                     return;
                 }
             }
             match &config.passwords {
                 PassSource::Single(p) => {
-                    if tx.send(Credential::new(u, p)).await.is_err() {
+                    if em.emit(Credential::new(u, p)).await.is_err() {
                         return;
                     }
                 }
                 PassSource::Charset(spec) => {
                     for pw in spec.iter() {
-                        if tx.send(Credential::new(u, &pw)).await.is_err() {
+                        if em.emit(Credential::new(u, &pw)).await.is_err() {
                             return;
                         }
                     }
@@ -110,7 +146,7 @@ pub async fn produce(config: CredConfig, tx: Sender<Credential>) {
                     if let Ok(file) = File::open(path).await {
                         let mut lines = BufReader::new(file).lines();
                         while let Ok(Some(pw)) = lines.next_line().await {
-                            if tx.send(Credential::new(u, &pw)).await.is_err() {
+                            if em.emit(Credential::new(u, &pw)).await.is_err() {
                                 return;
                             }
                         }

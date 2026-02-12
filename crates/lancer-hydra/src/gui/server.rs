@@ -70,6 +70,83 @@ async fn serve(state: Shared) {
     }
 }
 
+/// Extract `name=value` from a `?a=b&c=d` query string on `path`.
+fn query_param(path: &str, name: &str) -> Option<String> {
+    let q = path.split_once('?')?.1;
+    for pair in q.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == name {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// CSV export (RFC 4180) of the result set.
+fn export_csv(hits: &[Hit]) -> String {
+    let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+    let mut out = String::from("host,port,service,login,password,time_ms\r\n");
+    for h in hits {
+        out.push_str(&format!(
+            "{},{},{},{},{},{}\r\n",
+            q(&h.host),
+            h.port,
+            q(&h.service),
+            q(&h.login),
+            q(&h.password),
+            h.time_ms
+        ));
+    }
+    out
+}
+
+/// Markdown table export of the result set.
+fn export_markdown(hits: &[Hit]) -> String {
+    // Escape `|` so a field value can't break the table columns.
+    let esc = |s: &str| s.replace('|', "\\|");
+    let mut out = format!("# lancer-hydra results ({} found)\n\n", hits.len());
+    out.push_str("| host | port | service | login | password | ms |\n");
+    out.push_str("|------|------|---------|-------|----------|----|\n");
+    for h in hits {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} |\n",
+            esc(&h.host),
+            h.port,
+            esc(&h.service),
+            esc(&h.login),
+            esc(&h.password),
+            h.time_ms
+        ));
+    }
+    out
+}
+
+/// Minimal valid SARIF 2.1.0 document (one result per hit).
+fn export_sarif(hits: &[Hit]) -> String {
+    let esc = |s: &str| serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string());
+    let results = hits
+        .iter()
+        .map(|h| {
+            let msg = format!(
+                "valid credential {}:{} on {}:{}/{}",
+                h.login, h.password, h.host, h.port, h.service
+            );
+            format!(
+                "{{\"ruleId\":\"valid-credential\",\"level\":\"warning\",\"message\":{{\"text\":{}}}}}",
+                esc(&msg)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"version\":\"2.1.0\",\
+         \"$schema\":\"https://json.schemastore.org/sarif-2.1.0.json\",\
+         \"runs\":[{{\"tool\":{{\"driver\":{{\"name\":\"lancer-hydra\",\
+         \"rules\":[{{\"id\":\"valid-credential\"}}]}}}},\"results\":[{results}]}}]}}"
+    )
+}
+
 fn route(path: &str, state: &Shared) -> (&'static str, &'static str, String) {
     let st = match state.lock() {
         Ok(g) => g,
@@ -84,8 +161,16 @@ fn route(path: &str, state: &Shared) -> (&'static str, &'static str, String) {
         .to_string();
         ("200 OK", "application/json", body)
     } else if path.starts_with("/v1/export") {
-        let body = serde_json::to_string(&st.hits).unwrap_or_else(|_| "[]".to_string());
-        ("200 OK", "application/json", body)
+        // `?format=json|csv|sarif|markdown` (json is the default/fallback).
+        match query_param(path, "format").as_deref() {
+            Some("csv") => ("200 OK", "text/csv", export_csv(&st.hits)),
+            Some("markdown") | Some("md") => ("200 OK", "text/markdown", export_markdown(&st.hits)),
+            Some("sarif") => ("200 OK", "application/sarif+json", export_sarif(&st.hits)),
+            _ => {
+                let body = serde_json::to_string(&st.hits).unwrap_or_else(|_| "[]".to_string());
+                ("200 OK", "application/json", body)
+            }
+        }
     } else if path.starts_with("/v1/import") {
         ("200 OK", "application/json", "{\"ok\":true}".to_string())
     } else {

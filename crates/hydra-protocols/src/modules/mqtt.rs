@@ -54,12 +54,18 @@ impl Protocol for Mqtt {
         }
         let mut c = connect(&t, opts).await?;
 
+        // `-m v5` selects MQTT 5.0 (protocol level 5), else 3.1.1 (level 4).
+        let v5 = opts.mech_or("").to_uppercase().contains("V5") || opts.get("V5").is_some();
+
         // Variable header.
         let mut var = Vec::new();
         var.extend_from_slice(&mqtt_string("MQTT"));
-        var.push(0x04); // protocol level 4 (3.1.1)
+        var.push(if v5 { 0x05 } else { 0x04 }); // protocol level
         var.push(0xC2); // flags: username + password + clean session
         var.extend_from_slice(&60u16.to_be_bytes()); // keepalive
+        if v5 {
+            var.push(0x00); // CONNECT properties length = 0 (v5 only)
+        }
 
         // Payload: client id (empty) + username + password.
         let mut payload = Vec::new();
@@ -79,9 +85,10 @@ impl Protocol for Mqtt {
         if resp[0] != 0x20 {
             return Ok(AuthOutcome::Unknown);
         }
+        // v3.1.1 CONNACK return codes and v5 reason codes share byte position 3:
+        // 0x00 = accepted; anything else (0x04/0x05 v3, 0x86/0x87 v5) = rejected.
         Ok(match resp[3] {
-            0x00 => AuthOutcome::Success,        // accepted
-            0x04 | 0x05 => AuthOutcome::Failure, // bad credentials / not authorized
+            0x00 => AuthOutcome::Success,
             _ => AuthOutcome::Failure,
         })
     }
