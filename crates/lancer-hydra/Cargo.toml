@@ -1,0 +1,43 @@
+[package]
+name = "lancer-hydra"
+description = "Rust clone of THC-Hydra with a native GUI — part of the Lancer bug bounty toolkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+default-run = "lancer-hydra"
+
+[[bin]]
+name = "lancer-hydra"
+path = "src/main.rs"
+
+# Companion CLI-only binary (plan: `lancer-hydra-cli`). Shares the same CLI surface.
+[[bin]]
+name = "lancer-hydra-cli"
+path = "src/bin/cli.rs"
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+directories.workspace = true
+hydra-core.workspace = true
+hydra-protocols.workspace = true
+hydra-credlist.workspace = true
+hydra-output.workspace = true
+
+# GUI stack — feature-gated so headless/CI can build the CLI surface alone.
+eframe = { workspace = true, optional = true }
+egui_extras = { workspace = true, optional = true }
+rfd = { workspace = true, optional = true }
+arboard = { workspace = true, optional = true }
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe", "dep:egui_extras", "dep:rfd", "dep:arboard"]

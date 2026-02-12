@@ -1,0 +1,36 @@
+[package]
+name = "hydra-protocols"
+description = "Per-protocol auth modules for lancer-hydra (50+ protocols on the Protocol trait)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+inventory.workspace = true
+native-tls.workspace = true
+tokio-native-tls.workspace = true
+base64.workspace = true
+rand.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+md-5.workspace = true
+md4.workspace = true
+hmac.workspace = true
+des.workspace = true
+cbc.workspace = true
+aes.workspace = true
+ctr.workspace = true
+x25519-dalek.workspace = true
+hex.workspace = true
+regex.workspace = true
+byteorder.workspace = true

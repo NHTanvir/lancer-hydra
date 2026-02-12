@@ -1,0 +1,25 @@
+[package]
+name = "hydra-core"
+description = "Orchestration engine for lancer-hydra: worker pool, queues, rate limiting, restore, stop-on-found"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+governor.workspace = true
+hydra-protocols.workspace = true
+hydra-credlist.workspace = true
+hydra-output.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

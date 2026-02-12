@@ -1,0 +1,16 @@
+[package]
+name = "hydra-output"
+description = "Output formats (text/json/jsonv1/jsonl), progress bar and restore-file IO for lancer-hydra"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+indicatif.workspace = true
+hydra-protocols.workspace = true

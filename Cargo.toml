@@ -1,18 +1,76 @@
-[package]
-name = "lancer-hydra"
+[workspace]
+resolver = "2"
+members = [
+    "crates/lancer-hydra",
+    "crates/hydra-core",
+    "crates/hydra-protocols",
+    "crates/hydra-credlist",
+    "crates/hydra-output",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "Rust clone of hydra — part of the Lancer bug bounty toolkit"
-authors = ["NHTanvir <naymulhasantanvir10@gmail.com>"]
 license = "MIT"
+authors = ["NHTanvir <naymulhasantanvir10@gmail.com>"]
 repository = "https://github.com/NHTanvir/lancer-hydra"
+rust-version = "1.74"
 
-[dependencies]
-clap = { version = "4", features = ["derive"] }
+# Unified dependency versions across the whole workspace. Pinning here keeps the
+# egui-family crates and the TLS stack on a single version so the tree resolves
+# cleanly (mismatched egui/rustls versions are the classic cargo-check breakers).
+[workspace.dependencies]
+# --- async runtime / plumbing ---
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+async-trait = "0.1"
+futures = "0.3"
+# --- serialization ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# --- errors / logging ---
+thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# --- CLI ---
+clap = { version = "4", features = ["derive"] }
+# --- orchestration ---
+governor = "0.6"
+inventory = "0.3"
+# --- TLS (native-tls -> SChannel on Windows, no external build deps) ---
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+# --- crypto primitives (all pure-Rust, no system deps) ---
+base64 = "0.22"
+rand = "0.8"
+sha1 = "0.10"
+sha2 = "0.10"
+md-5 = "0.10"
+md4 = "0.10"
+hmac = "0.12"
+des = "0.8"
+cbc = "0.1"
+aes = "0.8"
+ctr = "0.9"
+x25519-dalek = "2"
+hex = "0.4"
+# --- misc ---
+regex = "1"
+byteorder = "1"
+indicatif = "0.17"
+directories = "5"
+# --- GUI (feature-gated in the binary) ---
+eframe = "0.31"
+egui_extras = "0.31"
+rfd = "0.15"
+arboard = "3"
+
+# --- internal crates ---
+hydra-core = { path = "crates/hydra-core" }
+hydra-protocols = { path = "crates/hydra-protocols" }
+hydra-credlist = { path = "crates/hydra-credlist" }
+hydra-output = { path = "crates/hydra-output" }
 
 [profile.release]
 opt-level = 3
