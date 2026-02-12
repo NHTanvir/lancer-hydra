@@ -6,6 +6,11 @@ target/
 build/
 dist/
 
+# Runtime artifacts
+hydra.restore
+*.restore.tmp
+lancer-hydra.port
+
 # OS / editor
 .DS_Store
 Thumbs.db
